@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  ydlidar:
+    image: ydlidar_driver:humble
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    # 시리얼 포트 마운트
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    # 환경변수로 포트/프레임 오버라이드
+    environment:
+      - LIDAR_PORT=/dev/ttyUSB0
+      - LIDAR_FRAME_ID=laser_frame
+      # ROS2 도메인 ID (다른 노드와 분리할 때 사용)
+      - ROS_DOMAIN_ID=0
+    # 호스트 네트워크 사용 (ROS2 DDS 통신에 필요)
+    network_mode: host
+    # 재시작 정책
+    restart: unless-stopped
+    # stdout 즉시 출력
+    tty: true

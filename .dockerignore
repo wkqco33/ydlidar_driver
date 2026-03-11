@@ -1,0 +1,18 @@
+# colcon 빌드 산출물 제외
+build/
+install/
+log/
+
+# git
+.git/
+.gitignore
+
+# VSCode
+.vscode/
+
+# Python 캐시
+__pycache__/
+*.pyc
+
+# OS 파일
+.DS_Store

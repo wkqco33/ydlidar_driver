@@ -1,0 +1,16 @@
+ydlidar_node:
+  ros__parameters:
+    # 시리얼 포트 (launch 인자로 덮어쓸 수 있음)
+    port: /dev/ttyUSB0
+    # ROS TF 프레임 ID
+    frame_id: laser_frame
+    # X4 Pro 고정 baudrate
+    baudrate: 128000
+    # 스캔 각도 범위 [도]
+    angle_min: -180.0
+    angle_max:  180.0
+    # 유효 거리 범위 [m]
+    range_min: 0.1
+    range_max: 12.0
+    # true: 범위 밖 포인트를 inf로 채움 / false: 0으로 채움
+    invalid_range_is_inf: false
