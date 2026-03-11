@@ -29,15 +29,15 @@ static constexpr uint8_t LIDAR_ANS_TYPE_MEASUREMENT = 0x81;
 static constexpr uint8_t LIDAR_ANS_MODE_SINGLE = 0x00;
 static constexpr uint8_t LIDAR_ANS_MODE_CONTINUOUS = 0x01;
 
-// ---- 스캔 패킷 플래그 ----
-static constexpr uint8_t LIDAR_RESP_SCAN_SYNC_FLAG = 0x01; // 새 스캔 시작
-static constexpr uint8_t LIDAR_RESP_SCAN_START_FLAG = 0x01;
+// ---- X4 Pro 스캔 패킷 동기화 바이트 ----
+// X4/X4Pro 스캔 데이터 패킷: [0xAA][0x55][CT][LSN][FSA×2][LSA×2][CS×2][SI×LSN×2]
+static constexpr uint8_t SCAN_SYNC_A = 0xAA;
+static constexpr uint8_t SCAN_SYNC_B = 0x55;
 
-// 스캔 패킷 헤더 크기 (sync_quality 1 + angle_q6 2 + dist_q2 2 = 최소 5바이트)
-static constexpr int SCAN_PACKET_HEADER_SIZE = 5;
-// 하나의 패킷에 담기는 최대 포인트 수 (X4: 단일 채널, 패킷당 1 노드)
-// SingleChannel 모드에서는 패킷 1개 = 포인트 1개
-static constexpr int SCAN_NODE_SIZE = 5; // 1 + 2 + 2 bytes
+// 패킷 헤더 크기: sync(2) + CT(1) + LSN(1) + FSA(2) + LSA(2) + CS(2) = 10 bytes
+static constexpr int SCAN_PKT_HEADER_SIZE = 10;
+// 패킷당 최대 샘플 수
+static constexpr int SCAN_PKT_MAX_SAMPLES = 40;
 
 #pragma pack(push, 1)
 
@@ -73,15 +73,22 @@ struct HealthInfo
     uint16_t error_code;
 };
 
-/// SingleChannel 스캔 노드 (X4 Pro)
-/// sync_quality: bit[0] = sync 플래그, bit[1]=0(질 무시)
-/// angle_q6:     각도 [degree] × 64 (고정소수점), bit[0]=start 플래그
-/// dist_q2:      거리 [mm] × 4
-struct ScanNode
+/// X4 Pro 스캔 패킷 헤더 (10 bytes)
+/// 동기화: [0xAA][0x55]
+/// CT  : bit0=1 → 새 회전의 첫 번째 패킷
+/// LSN : 이 패킷에 포함된 샘플 수 (1~40)
+/// FSA : 첫 샘플 각도 (Q6, bit0=1 항상)
+/// LSA : 마지막 샘플 각도 (Q6)
+/// CS  : 체크섬
+struct ScanPacketHeader
 {
-    uint8_t sync_quality;
-    uint16_t angle_q6;
-    uint16_t dist_q2;
+    uint8_t  sync_a;  ///< 0xAA
+    uint8_t  sync_b;  ///< 0x55
+    uint8_t  ct;      ///< 패킷 타입 (bit0=1: 새 회전 시작)
+    uint8_t  lsn;     ///< 샘플 수
+    uint16_t fsa;     ///< 첫 샘플 각도 Q6 (bits15:1=angle×64, bit0=1)
+    uint16_t lsa;     ///< 마지막 샘플 각도 Q6
+    uint16_t cs;      ///< 체크섬
 };
 
 #pragma pack(pop)
@@ -118,6 +125,12 @@ public:
     /// 응답 연속/단일 모드 추출
     static uint8_t getResponseMode(const ResponseHeader &hdr);
 
-    /// 스캔 노드 디코딩 (ScanNode → LidarPoint)
-    static bool decodeScanNode(const ScanNode &node, LidarPoint &pt);
+    /// 스캔 패킷에서 각도 보간 (각도[deg] 반환)
+    /// fsa_raw: FSA 필드 원시값, lsa_raw: LSA 필드 원시값
+    /// idx: 샘플 인덱스 (0~lsn-1), lsn: 총 샘플 수
+    static float interpolateAngle(uint16_t fsa_raw, uint16_t lsa_raw, int idx, int lsn);
+
+    /// 샘플 원시값 → 거리(m) 변환
+    /// si: 16비트 샘플 data (dist_q2 형식, 0.25mm 단위)
+    static float sampleToDistM(uint16_t si) { return static_cast<float>(si >> 2) / 1000.0f; }
 };

@@ -217,52 +217,85 @@ void X4ProLidar::scanLoop()
     scanning_ = false;
 }
 
-/// SingleChannel X4/X4Pro 스캔 데이터 수신 루프
-/// 패킷 구조: sync_quality(1) + angle_q6(2) + dist_q2(2) = 5 bytes / 노드
-/// sync_quality bit[0]=1 이면 새 회전의 첫 포인트
+/// X4 Pro 스캔 패킷 수신 루프
+///
+/// 실제 패킷 포맷 (X4/X4Pro, SingleChannel=true):
+///   [0xAA][0x55][CT:1][LSN:1][FSA:2][LSA:2][CS:2][SI×LSN×2]
+///   총 헤더 10 bytes + LSN×2 bytes payload
+///
+/// CT  bit0=1 → 이 패킷이 새 회전의 시작
+/// FSA/LSA bit[15:1]=angle_q6, bit[0]=플래그
+/// SI[i] = dist_q2 (0.25mm 단위, bit[15:2]=거리, bit[1:0]=미사용)
 void X4ProLidar::processScanData()
 {
     LidarScan current_scan;
-    uint8_t node_buf[SCAN_NODE_SIZE];
+    uint8_t byte_in;
 
     while (scanning_)
     {
-        // 5바이트 노드 수신
-        int received = 0;
-        while (received < SCAN_NODE_SIZE && scanning_)
-        {
-            int got = serial_.read(node_buf + received,
-                                   SCAN_NODE_SIZE - received, 50);
-            if (got > 0)
-                received += got;
+        // ── Step 1: 0xAA 0x55 동기화 ─────────────────────────────────
+        if (serial_.read(&byte_in, 1, 50) != 1) continue;
+        if (byte_in != SCAN_SYNC_A) continue;
+        if (serial_.read(&byte_in, 1, 50) != 1) continue;
+        if (byte_in != SCAN_SYNC_B) continue;
+
+        // ── Step 2: 나머지 헤더 8 bytes (CT, LSN, FSA×2, LSA×2, CS×2) ──
+        uint8_t hdr[8];
+        int rcv = 0;
+        while (rcv < 8 && scanning_) {
+            int got = serial_.read(hdr + rcv, 8 - rcv, 50);
+            if (got > 0) rcv += got;
         }
-        if (!scanning_)
-            break;
+        if (!scanning_) break;
 
-        ScanNode node;
-        memcpy(&node, node_buf, sizeof(ScanNode));
+        const uint8_t  ct  = hdr[0];
+        const uint8_t  lsn = hdr[1];
+        const uint16_t fsa = static_cast<uint16_t>(hdr[2]) |
+                             (static_cast<uint16_t>(hdr[3]) << 8);
+        const uint16_t lsa = static_cast<uint16_t>(hdr[4]) |
+                             (static_cast<uint16_t>(hdr[5]) << 8);
 
-        bool is_new_scan = (node.sync_quality & LIDAR_RESP_SCAN_SYNC_FLAG) != 0;
+        // LSN 범위 검사 (sanity check)
+        if (lsn == 0 || lsn > SCAN_PKT_MAX_SAMPLES) continue;
 
-        // 새 회전 시작 → 이전 스캔 완성본 콜백
-        if (is_new_scan && !current_scan.points.empty())
-        {
-            // 타임스탬프: 현재 시각 (nanoseconds)
+        // ── Step 3: LSN×2 bytes 샘플 데이터 수신 ────────────────────────
+        uint16_t samples[SCAN_PKT_MAX_SAMPLES];
+        auto * raw = reinterpret_cast<uint8_t *>(samples);
+        const int data_bytes = lsn * 2;
+        rcv = 0;
+        while (rcv < data_bytes && scanning_) {
+            int got = serial_.read(raw + rcv, data_bytes - rcv, 50);
+            if (got > 0) rcv += got;
+        }
+        if (!scanning_) break;
+
+        // ── Step 4: 새 회전 감지 → 이전 스캔 콜백 ───────────────────────
+        const bool is_new_scan = (ct & 0x01) != 0;
+        if (is_new_scan && !current_scan.points.empty()) {
             using namespace std::chrono;
             current_scan.stamp_ns = static_cast<uint64_t>(
                 duration_cast<nanoseconds>(
-                    system_clock::now().time_since_epoch())
-                    .count());
-
-            if (scan_cb_)
-                scan_cb_(current_scan);
+                    system_clock::now().time_since_epoch()).count());
+            if (scan_cb_) scan_cb_(current_scan);
             current_scan.points.clear();
         }
 
-        LidarPoint pt;
-        if (X4ProProtocol::decodeScanNode(node, pt))
-        {
-            current_scan.points.push_back(pt);
+        // ── Step 5: 포인트 디코딩 (각도 보간 + 거리 변환) ──────────────
+        for (int i = 0; i < static_cast<int>(lsn); i++) {
+            const uint16_t si = samples[i];
+            if (si == 0) continue;  // 무효 포인트
+
+            float dist_m = X4ProProtocol::sampleToDistM(si);
+
+            // 각도 보간: FSA~LSA 사이를 lsn 등분
+            float angle = X4ProProtocol::interpolateAngle(fsa, lsa, i, lsn);
+
+            // X4 Pro reversion=true: 회전 방향 반전
+            angle = 360.0f - angle;
+            if (angle >= 360.0f) angle -= 360.0f;
+            if (angle <    0.0f) angle += 360.0f;
+
+            current_scan.points.push_back({angle, dist_m});
         }
     }
 }

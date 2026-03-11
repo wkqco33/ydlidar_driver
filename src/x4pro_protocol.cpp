@@ -35,27 +35,16 @@ uint8_t X4ProProtocol::getResponseMode(const ResponseHeader &hdr)
     return (hdr.size_and_mode >> 30) & 0x03;
 }
 
-bool X4ProProtocol::decodeScanNode(const ScanNode &node, LidarPoint &pt)
+float X4ProProtocol::interpolateAngle(
+    uint16_t fsa_raw, uint16_t lsa_raw, int idx, int lsn)
 {
-    // 거리가 0이면 무효 포인트
-    if (node.dist_q2 == 0)
-    {
-        return false;
-    }
+    // bit[0]은 플래그 — 제거 후 Q6 → 도 변환
+    const float fsa_deg = static_cast<float>(fsa_raw >> 1) / 64.0f;
+    const float lsa_deg = static_cast<float>(lsa_raw >> 1) / 64.0f;
 
-    // 각도 디코딩: angle_q6 >> 1 (bit[0]은 start 플래그), 단위: 1/64 도
-    float angle_deg = static_cast<float>(node.angle_q6 >> 1) / 64.0f;
+    float diff = lsa_deg - fsa_deg;
+    if (diff < 0.0f) diff += 360.0f;
 
-    // X4 Pro reversion=true → 360 - angle
-    // inverted=true → 그대로 사용 (이미 reversion에서 처리)
-    angle_deg = 360.0f - angle_deg;
-    if (angle_deg >= 360.0f)
-        angle_deg -= 360.0f;
-
-    // 거리 디코딩: dist_q2 / 4.0, 단위: mm → m
-    float dist_m = static_cast<float>(node.dist_q2) / 4.0f / 1000.0f;
-
-    pt.angle_deg = angle_deg;
-    pt.dist_m = dist_m;
-    return true;
+    const float step = (lsn > 1) ? diff / static_cast<float>(lsn - 1) : 0.0f;
+    return fsa_deg + step * static_cast<float>(idx);
 }
