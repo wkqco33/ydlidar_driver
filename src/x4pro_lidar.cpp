@@ -213,8 +213,17 @@ bool X4ProLidar::getHealthInfo()
 
 void X4ProLidar::scanLoop()
 {
-    processScanData();
+    std::string error_reason;
+    bool hard_error = processScanData(error_reason);
     scanning_ = false;
+    if (hard_error)
+    {
+        // disconnect() before invoking the callback so the callback's own
+        // isConnected()/isScanning() checks (e.g. deciding whether to
+        // reconnect) see accurate state.
+        disconnect();
+        if (error_cb_) error_cb_(error_reason);
+    }
 }
 
 /// X4 Pro 스캔 패킷 수신 루프
@@ -226,7 +235,7 @@ void X4ProLidar::scanLoop()
 /// CT  bit0=1 → 이 패킷이 새 회전의 시작
 /// FSA/LSA bit[15:1]=angle_q6, bit[0]=플래그
 /// SI[i] = dist_q2 (0.25mm 단위, bit[15:2]=거리, bit[1:0]=미사용)
-void X4ProLidar::processScanData()
+bool X4ProLidar::processScanData(std::string &error_reason)
 {
     LidarScan current_scan;
     uint8_t byte_in;
@@ -234,9 +243,13 @@ void X4ProLidar::processScanData()
     while (scanning_)
     {
         // ── Step 1: 0xAA 0x55 동기화 ─────────────────────────────────
-        if (serial_.read(&byte_in, 1, 50) != 1) continue;
+        int n = serial_.read(&byte_in, 1, 50);
+        if (n < 0) { error_reason = "serial read error (sync byte 1)"; return true; }
+        if (n != 1) continue;
         if (byte_in != SCAN_SYNC_A) continue;
-        if (serial_.read(&byte_in, 1, 50) != 1) continue;
+        n = serial_.read(&byte_in, 1, 50);
+        if (n < 0) { error_reason = "serial read error (sync byte 2)"; return true; }
+        if (n != 1) continue;
         if (byte_in != SCAN_SYNC_B) continue;
 
         // ── Step 2: 나머지 헤더 8 bytes (CT, LSN, FSA×2, LSA×2, CS×2) ──
@@ -244,6 +257,7 @@ void X4ProLidar::processScanData()
         int rcv = 0;
         while (rcv < 8 && scanning_) {
             int got = serial_.read(hdr + rcv, 8 - rcv, 50);
+            if (got < 0) { error_reason = "serial read error (header)"; return true; }
             if (got > 0) rcv += got;
         }
         if (!scanning_) break;
@@ -265,6 +279,7 @@ void X4ProLidar::processScanData()
         rcv = 0;
         while (rcv < data_bytes && scanning_) {
             int got = serial_.read(raw + rcv, data_bytes - rcv, 50);
+            if (got < 0) { error_reason = "serial read error (sample data)"; return true; }
             if (got > 0) rcv += got;
         }
         if (!scanning_) break;
@@ -298,4 +313,5 @@ void X4ProLidar::processScanData()
             current_scan.points.push_back({angle, dist_m});
         }
     }
+    return false;
 }

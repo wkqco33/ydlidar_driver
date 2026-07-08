@@ -18,7 +18,10 @@ public:
     void close();
     bool isOpen() const { return fd_ >= 0; }
 
-    /// 최대 len 바이트 읽기. 타임아웃 ms 내에 수신된 바이트 수를 반환.
+    /// 최대 len 바이트 읽기.
+    /// 반환값 > 0: 수신된 바이트 수
+    /// 반환값 == 0: 타임아웃 (정상 - 아직 데이터 없음)
+    /// 반환값 == -1: 하드 에러 (포트가 사라짐/닫힘 등 - 재연결 필요)
     int read(uint8_t *buf, int len, int timeout_ms = 100);
 
     /// len 바이트 쓰기. 송신 바이트 수 반환.

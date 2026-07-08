@@ -13,6 +13,11 @@ class X4ProLidar
 {
 public:
     using ScanCallback = std::function<void(const LidarScan &)>;
+    // Called from the scan thread when a hard serial error is detected
+    // (port unplugged/died) - by the time this fires, disconnect() has
+    // already been called internally so isConnected()/isScanning() are
+    // both false; the argument is a human-readable reason.
+    using ErrorCallback = std::function<void(const std::string &)>;
 
     X4ProLidar() = default;
     ~X4ProLidar();
@@ -36,6 +41,9 @@ public:
     /// 스캔 완료 시 호출될 콜백 등록
     void setScanCallback(ScanCallback cb) { scan_cb_ = std::move(cb); }
 
+    /// 스캔 중 하드 에러(포트 소실 등) 발생 시 호출될 콜백 등록
+    void setErrorCallback(ErrorCallback cb) { error_cb_ = std::move(cb); }
+
     const DeviceInfo &deviceInfo() const { return dev_info_; }
 
 private:
@@ -43,6 +51,7 @@ private:
     DeviceInfo dev_info_{};
     bool dev_info_ok_{false};
     ScanCallback scan_cb_;
+    ErrorCallback error_cb_;
     std::atomic<bool> scanning_{false};
 
     // ---- 내부 헬퍼 ----
@@ -54,6 +63,7 @@ private:
     /// 스캔 수신 루프 (startScan 내에서 호출)
     void scanLoop();
 
-    /// 수신 버퍼에서 스캔 노드를 읽고 1회전이 완료되면 콜백 호출
-    void processScanData();
+    /// 수신 버퍼에서 스캔 노드를 읽고 1회전이 완료되면 콜백 호출.
+    /// 하드 에러(포트 소실)로 중단된 경우 true를 반환하고 error_reason에 사유를 채운다.
+    bool processScanData(std::string &error_reason);
 };

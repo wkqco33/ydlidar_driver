@@ -68,17 +68,42 @@ public:
           }
         });
 
+    // 스캔 중 하드 에러(포트 소실) 발생 시 재연결 루프 트리거
+    lidar_.setErrorCallback([this](const std::string &reason)
+                            {
+                              RCLCPP_ERROR(get_logger(),
+                                           "Lidar disconnected: %s. Reconnecting every 3s.",
+                                           reason.c_str());
+                              scheduleReconnect();
+                            });
+
     // ---- 라이다 연결 ----
+    if (!connectAndStart())
+    {
+      RCLCPP_ERROR(get_logger(),
+                   "Failed to open serial port %s. "
+                   "Check USB connection and port permissions (dialout group). "
+                   "Retrying every 3s.",
+                   port_.c_str());
+      scheduleReconnect();
+    }
+  }
+
+  ~YdlidarNode()
+  {
+    lidar_.disconnect();
+  }
+
+private:
+  /// (재)연결 + 장치 정보 조회 + 스캔 시작을 한 번에 수행. 성공 여부 반환.
+  bool connectAndStart()
+  {
     RCLCPP_INFO(get_logger(), "Connecting to YDLidar X4 Pro on %s @ %d",
                 port_.c_str(), baudrate_);
 
     if (!lidar_.connect(port_, baudrate_))
     {
-      RCLCPP_FATAL(get_logger(),
-                   "Failed to open serial port %s. "
-                   "Check USB connection and port permissions (dialout group).",
-                   port_.c_str());
-      return;
+      return false;
     }
 
     if (lidar_.isDeviceInfoOk()) {
@@ -102,19 +127,33 @@ public:
     if (!lidar_.startScan())
     {
       RCLCPP_ERROR(get_logger(), "Failed to start scan.");
+      lidar_.disconnect();
+      return false;
     }
-    else
-    {
-      RCLCPP_INFO(get_logger(), "Scan started. Publishing on /scan");
-    }
+
+    RCLCPP_INFO(get_logger(), "Scan started. Publishing on /scan");
+    return true;
   }
 
-  ~YdlidarNode()
+  void scheduleReconnect()
   {
-    lidar_.disconnect();
+    if (reconnect_timer_)
+    {
+      return; // already retrying
+    }
+    reconnect_timer_ = create_wall_timer(
+        std::chrono::seconds(3),
+        [this]()
+        {
+          if (connectAndStart())
+          {
+            RCLCPP_INFO(get_logger(), "Lidar reconnected.");
+            reconnect_timer_->cancel();
+            reconnect_timer_.reset();
+          }
+        });
   }
 
-private:
   void onScan(const LidarScan &scan)
   {
     if (scan.points.empty())
@@ -184,6 +223,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr stop_srv_;
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr start_srv_;
+  rclcpp::TimerBase::SharedPtr reconnect_timer_;
 
   std::string port_;
   std::string frame_id_;

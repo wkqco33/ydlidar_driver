@@ -155,10 +155,22 @@ int X4ProSerial::read(uint8_t *buf, int len, int timeout_ms)
     tv.tv_usec = (timeout_ms % 1000) * 1000;
 
     int ret = select(fd_ + 1, &fds, nullptr, nullptr, &tv);
-    if (ret <= 0)
-        return 0;
+    if (ret == 0)
+        return 0; // timeout - normal, no data yet
+    if (ret < 0)
+    {
+        if (errno == EINTR)
+            return 0; // interrupted by signal, treat like a timeout, caller will retry
+        return -1;    // select() itself failing (e.g. EBADF) means the fd is dead
+    }
 
-    return ::read(fd_, buf, len);
+    int n = ::read(fd_, buf, len);
+    if (n > 0)
+        return n;
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+        return 0; // benign race with select(), retry next call
+    // n == 0 (EOF/hangup) or a hard errno (ENODEV, EIO, ...): the port is gone
+    return -1;
 }
 
 int X4ProSerial::write(const uint8_t *buf, int len)
