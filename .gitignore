@@ -49,14 +49,19 @@ Temporary Items
 # iCloud generated files
 *.icloud
 
-### ROS2 ###
+### ROS2 & Colcon ###
 install/
 log/
 build/
+test_results/
+COLCON_IGNORE
+AMENT_IGNORE
+*.log
+*.pcd
+*.pyc
+compile_commands.json
+.cache/
 
-# Ignore generated docs
-*.dox
-*.wikidoc
 
 # eclipse stuff
 .project

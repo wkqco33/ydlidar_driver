@@ -3,7 +3,7 @@
 <package format="3">
   <name>ydlidar_driver</name>
   <version>1.0.0</version>
-  <description>YDLidar X4 Pro ROS2 driver (no external SDK, serial direct)</description>
+  <description>High-performance YDLidar X4 Pro ROS 2 driver with zero external SDK dependencies</description>
   <maintainer email="wkqco33@gmail.com">wkqco</maintainer>
   <license>Apache-2.0</license>
 
@@ -13,6 +13,7 @@
   <depend>sensor_msgs</depend>
   <depend>std_srvs</depend>
 
+  <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 

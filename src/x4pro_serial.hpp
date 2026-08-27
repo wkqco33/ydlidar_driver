@@ -1,40 +1,49 @@
 #pragma once
 
-#include <string>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
+#include <string>
 
-/// UART 시리얼 포트 래퍼
-/// - termios 기반 raw 모드
-/// - DTR 핀으로 모터 ON/OFF (X4 Pro는 support_motor_dtr = true)
-class X4ProSerial
-{
+namespace ydlidar {
+
+/// @brief Raw POSIX serial port wrapper with DTR motor control and custom baudrate support
+class X4ProSerial {
 public:
-    X4ProSerial() = default;
-    ~X4ProSerial();
+  X4ProSerial() = default;
+  ~X4ProSerial();
 
-    /// 포트 오픈 및 baudrate 설정 (기본 128000)
-    bool open(const std::string &port, int baudrate = 128000);
-    void close();
-    bool isOpen() const { return fd_ >= 0; }
+  X4ProSerial(const X4ProSerial &) = delete;
+  X4ProSerial &operator=(const X4ProSerial &) = delete;
 
-    /// 최대 len 바이트 읽기.
-    /// 반환값 > 0: 수신된 바이트 수
-    /// 반환값 == 0: 타임아웃 (정상 - 아직 데이터 없음)
-    /// 반환값 == -1: 하드 에러 (포트가 사라짐/닫힘 등 - 재연결 필요)
-    int read(uint8_t *buf, int len, int timeout_ms = 100);
+  /// @brief Open serial port and set baudrate (default: 128000)
+  bool open(const std::string &port, int baudrate = 128000);
 
-    /// len 바이트 쓰기. 송신 바이트 수 반환.
-    int write(const uint8_t *buf, int len);
+  /// @brief Close serial port and deactivate DTR
+  void close();
 
-    /// DTR 라인 설정으로 모터 제어
-    void setDTR(bool on);
+  /// @brief Check if port is open
+  [[nodiscard]] bool isOpen() const noexcept {
+    return fd_ >= 0;
+  }
 
-    /// 수신 버퍼 비우기
-    void flush();
+  /// @brief Read up to len bytes from port with timeout.
+  /// @return >0: bytes read, 0: timeout (no data), -1: hard I/O error
+  int read(uint8_t *buf, int len, int timeout_ms = 100);
+
+  /// @brief Write bytes to serial port.
+  /// @return Bytes written or -1 on error.
+  int write(const uint8_t *buf, int len);
+
+  /// @brief Control DTR line (used for LiDAR motor on/off)
+  void setDTR(bool on);
+
+  /// @brief Flush serial RX/TX buffers
+  void flush();
 
 private:
-    int fd_{-1};
+  int fd_{-1};
 
-    bool applyBaudrate(int baudrate);
+  bool applyBaudrate(int baudrate);
 };
+
+} // namespace ydlidar
